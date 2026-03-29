@@ -1,0 +1,892 @@
+package com.lamsat.tailormanager;
+
+import android.os.Bundle;
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.fragment.app.Fragment;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+
+public class MainActivity extends AppCompatActivity {
+
+    BottomNavigationView bottomNavigationView;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        bottomNavigationView = findViewById(R.id.bottom_navigation);
+
+        // الافتراضي: InventoryFragment
+        getSupportFragmentManager().beginTransaction().replace(R.id.fragment_container, new InventoryFragment()).commit();
+
+        bottomNavigationView.setOnItemSelectedListener(item -> {
+            Fragment selectedFragment = null;
+            switch(item.getItemId()){
+                case R.id.nav_inventory:
+                    selectedFragment = new InventoryFragment();
+                    break;
+                case R.id.nav_sales:
+                    selectedFragment = new SalesFragment();
+                    break;
+                case R.id.nav_workers:
+                    selectedFragment = new WorkersFragment();
+                    break;
+                case R.id.nav_reservations:
+                    selectedFragment = new ReservationsFragment();
+                    break;
+                case R.id.nav_tailoring:
+                    selectedFragment = new TailoringFragment();
+                    break;
+                case R.id.nav_alterations:
+                    selectedFragment = new AlterationsFragment();
+                    break;
+                case R.id.nav_debts:
+                    selectedFragment = new DebtsFragment();
+                    break;
+                case R.id.nav_suppliers:
+                    selectedFragment = new SuppliersFragment();
+                    break;
+                case R.id.nav_settings:
+                    selectedFragment = new SettingsFragment();
+                    break;
+            }
+
+            getSupportFragmentManager().beginTransaction().replace(R.id.fragment_container, selectedFragment).commit();
+            return true;
+        });
+    }
+}package com.lamsat.tailormanager;
+
+import android.content.Context;
+import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteOpenHelper;
+
+public class SQLiteHelper extends SQLiteOpenHelper {
+
+    private static final String DB_NAME = "TailorManager.db";
+    private static final int DB_VERSION = 1;
+
+    public SQLiteHelper(Context context){
+        super(context, DB_NAME, null, DB_VERSION);
+    }
+
+    @Override
+    public void onCreate(SQLiteDatabase db) {
+        // جدول المخزون
+        db.execSQL("CREATE TABLE inventory(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, color TEXT, length INTEGER, width INTEGER, fabric TEXT, quantity INTEGER, price REAL, purchase_price REAL)");
+
+        // جدول المبيعات
+        db.execSQL("CREATE TABLE sales(id INTEGER PRIMARY KEY AUTOINCREMENT, inventory_id INTEGER, quantity INTEGER, price REAL, discount REAL, final_price REAL, received REAL, date TEXT, worker_name TEXT)");
+
+        // جدول العمال
+        db.execSQL("CREATE TABLE workers(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, phone TEXT, total_sales REAL, deductions REAL, withdrawals REAL)");
+
+        // جدول الحجوزات
+        db.execSQL("CREATE TABLE reservations(id INTEGER PRIMARY KEY AUTOINCREMENT, client_name TEXT, phone TEXT, quantity INTEGER, color TEXT, length INTEGER, width INTEGER, price REAL, delivered REAL, remaining REAL)");
+
+        // جدول طلب التفصيل
+        db.execSQL("CREATE TABLE tailoring(id INTEGER PRIMARY KEY AUTOINCREMENT, client_name TEXT, phone TEXT, length INTEGER, width INTEGER, neck INTEGER, sleeve INTEGER, fabric TEXT, color TEXT, pockets TEXT, buttons TEXT, zipper TEXT, price REAL, date TEXT)");
+
+        // جدول التعديلات
+        db.execSQL("CREATE TABLE alterations(id INTEGER PRIMARY KEY AUTOINCREMENT, client_name TEXT, phone TEXT, old_length INTEGER, old_width INTEGER, new_length INTEGER, new_width INTEGER, price REAL, status TEXT)");
+
+        // جدول المديونية
+        db.execSQL("CREATE TABLE debts(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, phone TEXT, amount REAL, remaining REAL, type TEXT)");
+
+        // جدول الموردين
+        db.execSQL("CREATE TABLE suppliers(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, phone TEXT, fabric_type TEXT, supplies TEXT)");
+    }
+
+    @Override
+    public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        // تحديثات مستقبلية
+        db.execSQL("DROP TABLE IF EXISTS inventory");
+        db.execSQL("DROP TABLE IF EXISTS sales");
+        db.execSQL("DROP TABLE IF EXISTS workers");
+        db.execSQL("DROP TABLE IF EXISTS reservations");
+        db.execSQL("DROP TABLE IF EXISTS tailoring");
+        db.execSQL("DROP TABLE IF EXISTS alterations");
+        db.execSQL("DROP TABLE IF EXISTS debts");
+        db.execSQL("DROP TABLE IF EXISTS suppliers");
+        onCreate(db);
+    }
+}package com.lamsat.tailormanager;
+
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.os.Bundle;
+import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Toast;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import java.util.ArrayList;
+
+public class InventoryFragment extends Fragment {
+
+    RecyclerView recyclerView;
+    FloatingActionButton fabAdd;
+    ArrayList<InventoryItem> inventoryList;
+    InventoryAdapter adapter;
+    SQLiteHelper dbHelper;
+
+    public InventoryFragment() {}
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container,
+                             Bundle savedInstanceState) {
+        View view = inflater.inflate(R.layout.fragment_inventory, container, false);
+
+        recyclerView = view.findViewById(R.id.recycler_inventory);
+        fabAdd = view.findViewById(R.id.fab_add_inventory);
+        dbHelper = new SQLiteHelper(getContext());
+
+        inventoryList = new ArrayList<>();
+        adapter = new InventoryAdapter(getContext(), inventoryList, dbHelper);
+        recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+        recyclerView.setAdapter(adapter);
+
+        loadInventory();
+
+        fabAdd.setOnClickListener(v -> {
+            Toast.makeText(getContext(), "اضافة ثوب جديد", Toast.LENGTH_SHORT).show();
+            // TODO: Open AddInventoryDialog
+        });
+
+        return view;
+    }
+
+    private void loadInventory() {
+        inventoryList.clear();
+        SQLiteDatabase db = dbHelper.getReadableDatabase();
+        Cursor cursor = db.rawQuery("SELECT * FROM inventory", null);
+
+        if(cursor.moveToFirst()){
+            do {
+                InventoryItem item = new InventoryItem(
+                        cursor.getInt(cursor.getColumnIndex("id")),
+                        cursor.getString(cursor.getColumnIndex("name")),
+                        cursor.getString(cursor.getColumnIndex("color")),
+                        cursor.getInt(cursor.getColumnIndex("length")),
+                        cursor.getInt(cursor.getColumnIndex("width")),
+                        cursor.getString(cursor.getColumnIndex("fabric")),
+                        cursor.getInt(cursor.getColumnIndex("quantity")),
+                        cursor.getDouble(cursor.getColumnIndex("price")),
+                        cursor.getDouble(cursor.getColumnIndex("purchase_price"))
+                );
+                inventoryList.add(item);
+            } while(cursor.moveToNext());
+        }
+        cursor.close();
+        adapter.notifyDataSetChanged();
+    }
+}package com.lamsat.tailormanager;
+
+public class InventoryItem {
+    int id, length, width, quantity;
+    String name, color, fabric;
+    double price, purchasePrice;
+
+    public InventoryItem(int id, String name, String color, int length, int width, String fabric, int quantity, double price, double purchasePrice){
+        this.id = id;
+        this.name = name;
+        this.color = color;
+        this.length = length;
+        this.width = width;
+        this.fabric = fabric;
+        this.quantity = quantity;
+        this.price = price;
+        this.purchasePrice = purchasePrice;
+    }
+}package com.lamsat.tailormanager;
+
+import android.content.Context;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+import java.util.ArrayList;
+
+public class InventoryAdapter extends RecyclerView.Adapter<InventoryAdapter.ViewHolder> {
+
+    Context context;
+    ArrayList<InventoryItem> list;
+    SQLiteHelper dbHelper;
+
+    public InventoryAdapter(Context context, ArrayList<InventoryItem> list, SQLiteHelper dbHelper){
+        this.context = context;
+        this.list = list;
+        this.dbHelper = dbHelper;
+    }
+
+    @NonNull
+    @Override
+    public InventoryAdapter.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view = LayoutInflater.from(context).inflate(R.layout.item_inventory, parent, false);
+        return new ViewHolder(view);
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull InventoryAdapter.ViewHolder holder, int position) {
+        InventoryItem item = list.get(position);
+        holder.txtName.setText(item.name);
+        holder.txtColor.setText("اللون: " + item.color);
+        holder.txtSize.setText("المقاس: " + item.length + " × " + item.width);
+        holder.txtFabric.setText("نوع القماش: " + item.fabric);
+        holder.txtQuantity.setText("الكمية: " + item.quantity);
+        holder.txtPrice.setText("سعر البيع: " + item.price + " ريال");
+        holder.txtPurchase.setText("سعر الشراء: " + item.purchasePrice + " ريال");
+    }
+
+    @Override
+    public int getItemCount() {
+        return list.size();
+    }
+
+    public class ViewHolder extends RecyclerView.ViewHolder{
+        TextView txtName, txtColor, txtSize, txtFabric, txtQuantity, txtPrice, txtPurchase;
+
+        public ViewHolder(@NonNull View itemView){
+            super(itemView);
+            txtName = itemView.findViewById(R.id.txt_inventory_name);
+            txtColor = itemView.findViewById(R.id.txt_inventory_color);
+            txtSize = itemView.findViewById(R.id.txt_inventory_size);
+            txtFabric = itemView.findViewById(R.id.txt_inventory_fabric);
+            txtQuantity = itemView.findViewById(R.id.txt_inventory_quantity);
+            txtPrice = itemView.findViewById(R.id.txt_inventory_price);
+            txtPurchase = itemView.findViewById(R.id.txt_inventory_purchase);
+        }
+    }
+}package com.lamsat.tailormanager;
+
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.os.Bundle;
+import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import java.util.ArrayList;
+
+public class WorkersFragment extends Fragment {
+
+    RecyclerView recyclerView;
+    FloatingActionButton fabAdd;
+    ArrayList<WorkerItem> workersList;
+    WorkersAdapter adapter;
+    SQLiteHelper dbHelper;
+
+    public WorkersFragment() {}
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container,
+                             Bundle savedInstanceState) {
+        View view = inflater.inflate(R.layout.fragment_workers, container, false);
+
+        recyclerView = view.findViewById(R.id.recycler_workers);
+        fabAdd = view.findViewById(R.id.fab_add_worker);
+        dbHelper = new SQLiteHelper(getContext());
+
+        workersList = new ArrayList<>();
+        adapter = new WorkersAdapter(getContext(), workersList, dbHelper);
+        recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+        recyclerView.setAdapter(adapter);
+
+        loadWorkers();
+
+        fabAdd.setOnClickListener(v -> {
+            // TODO: Open AddWorkerDialog to insert new worker
+        });
+
+        return view;
+    }
+
+    private void loadWorkers() {
+        workersList.clear();
+        SQLiteDatabase db = dbHelper.getReadableDatabase();
+        Cursor cursor = db.rawQuery("SELECT * FROM workers", null);
+
+        if(cursor.moveToFirst()){
+            do {
+                WorkerItem worker = new WorkerItem(
+                        cursor.getInt(cursor.getColumnIndex("id")),
+                        cursor.getString(cursor.getColumnIndex("name")),
+                        cursor.getString(cursor.getColumnIndex("phone")),
+                        cursor.getDouble(cursor.getColumnIndex("total_sales")),
+                        cursor.getDouble(cursor.getColumnIndex("deductions")),
+                        cursor.getDouble(cursor.getColumnIndex("withdrawals"))
+                );
+                workersList.add(worker);
+            } while(cursor.moveToNext());
+        }
+        cursor.close();
+        adapter.notifyDataSetChanged();
+    }
+}package com.lamsat.tailormanager;
+
+public class WorkerItem {
+    int id;
+    String name, phone;
+    double totalSales, deductions, withdrawals;
+
+    public WorkerItem(int id, String name, String phone, double totalSales, double deductions, double withdrawals){
+        this.id = id;
+        this.name = name;
+        this.phone = phone;
+        this.totalSales = totalSales;
+        this.deductions = deductions;
+        this.withdrawals = withdrawals;
+    }
+}package com.lamsat.tailormanager;
+
+import android.content.Context;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+import java.util.ArrayList;
+
+public class WorkersAdapter extends RecyclerView.Adapter<WorkersAdapter.ViewHolder> {
+
+    Context context;
+    ArrayList<WorkerItem> list;
+    SQLiteHelper dbHelper;
+
+    public WorkersAdapter(Context context, ArrayList<WorkerItem> list, SQLiteHelper dbHelper){
+        this.context = context;
+        this.list = list;
+        this.dbHelper = dbHelper;
+    }
+
+    @NonNull
+    @Override
+    public WorkersAdapter.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view = LayoutInflater.from(context).inflate(R.layout.item_worker, parent, false);
+        return new ViewHolder(view);
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull WorkersAdapter.ViewHolder holder, int position) {
+        WorkerItem worker = list.get(position);
+        holder.txtName.setText(worker.name);
+        holder.txtPhone.setText("الهاتف: " + worker.phone);
+        holder.txtSales.setText("مبيعات: " + worker.totalSales + " ريال");
+        holder.txtDeductions.setText("خصومات: " + worker.deductions + " ريال");
+        holder.txtWithdrawals.setText("سحب: " + worker.withdrawals + " ريال");
+    }
+
+    @Override
+    public int getItemCount() {
+        return list.size();
+    }
+
+    public class ViewHolder extends RecyclerView.ViewHolder{
+        TextView txtName, txtPhone, txtSales, txtDeductions, txtWithdrawals;
+
+        public ViewHolder(@NonNull View itemView){
+            super(itemView);
+            txtName = itemView.findViewById(R.id.txt_worker_name);
+            txtPhone = itemView.findViewById(R.id.txt_worker_phone);
+            txtSales = itemView.findViewById(R.id.txt_worker_sales);
+            txtDeductions = itemView.findViewById(R.id.txt_worker_deductions);
+            txtWithdrawals = itemView.findViewById(R.id.txt_worker_withdrawals);
+        }
+    }
+}package com.lamsat.tailormanager;
+
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.os.Bundle;
+import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import java.util.ArrayList;
+
+public class ReservationsFragment extends Fragment {
+
+    RecyclerView recyclerView;
+    FloatingActionButton fabAdd;
+    ArrayList<ReservationItem> reservationsList;
+    ReservationsAdapter adapter;
+    SQLiteHelper dbHelper;
+
+    public ReservationsFragment() {}
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container,
+                             Bundle savedInstanceState) {
+        View view = inflater.inflate(R.layout.fragment_reservations, container, false);
+
+        recyclerView = view.findViewById(R.id.recycler_reservations);
+        fabAdd = view.findViewById(R.id.fab_add_reservation);
+        dbHelper = new SQLiteHelper(getContext());
+
+        reservationsList = new ArrayList<>();
+        adapter = new ReservationsAdapter(getContext(), reservationsList, dbHelper);
+        recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+        recyclerView.setAdapter(adapter);
+
+        loadReservations();
+
+        fabAdd.setOnClickListener(v -> {
+            // TODO: Open AddReservationDialog
+        });
+
+        return view;
+    }
+
+    private void loadReservations() {
+        reservationsList.clear();
+        SQLiteDatabase db = dbHelper.getReadableDatabase();
+        Cursor cursor = db.rawQuery("SELECT * FROM reservations", null);
+
+        if(cursor.moveToFirst()){
+            do {
+                ReservationItem reservation = new ReservationItem(
+                        cursor.getInt(cursor.getColumnIndex("id")),
+                        cursor.getString(cursor.getColumnIndex("client_name")),
+                        cursor.getString(cursor.getColumnIndex("phone")),
+                        cursor.getInt(cursor.getColumnIndex("quantity")),
+                        cursor.getString(cursor.getColumnIndex("color")),
+                        cursor.getInt(cursor.getColumnIndex("length")),
+                        cursor.getInt(cursor.getColumnIndex("width")),
+                        cursor.getDouble(cursor.getColumnIndex("price")),
+                        cursor.getDouble(cursor.getColumnIndex("delivered")),
+                        cursor.getDouble(cursor.getColumnIndex("remaining"))
+                );
+                reservationsList.add(reservation);
+            } while(cursor.moveToNext());
+        }
+        cursor.close();
+        adapter.notifyDataSetChanged();
+    }
+}package com.lamsat.tailormanager;
+
+public class ReservationItem {
+    int id, quantity, length, width;
+    String clientName, phone, color;
+    double price, delivered, remaining;
+
+    public ReservationItem(int id, String clientName, String phone, int quantity, String color, int length, int width, double price, double delivered, double remaining){
+        this.id = id;
+        this.clientName = clientName;
+        this.phone = phone;
+        this.quantity = quantity;
+        this.color = color;
+        this.length = length;
+        this.width = width;
+        this.price = price;
+        this.delivered = delivered;
+        this.remaining = remaining;
+    }
+}package com.lamsat.tailormanager;
+
+import android.content.Context;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+import java.util.ArrayList;
+
+public class ReservationsAdapter extends RecyclerView.Adapter<ReservationsAdapter.ViewHolder> {
+
+    Context context;
+    ArrayList<ReservationItem> list;
+    SQLiteHelper dbHelper;
+
+    public ReservationsAdapter(Context context, ArrayList<ReservationItem> list, SQLiteHelper dbHelper){
+        this.context = context;
+        this.list = list;
+        this.dbHelper = dbHelper;
+    }
+
+    @NonNull
+    @Override
+    public ReservationsAdapter.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view = LayoutInflater.from(context).inflate(R.layout.item_reservation, parent, false);
+        return new ViewHolder(view);
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull ReservationsAdapter.ViewHolder holder, int position) {
+        ReservationItem res = list.get(position);
+        holder.txtClient.setText(res.clientName);
+        holder.txtPhone.setText("الهاتف: " + res.phone);
+        holder.txtQuantity.setText("الكمية: " + res.quantity);
+        holder.txtColor.setText("اللون: " + res.color);
+        holder.txtLength.setText("الطول: " + res.length);
+        holder.txtWidth.setText("العرض: " + res.width);
+        holder.txtPrice.setText("السعر: " + res.price);
+        holder.txtDelivered.setText("تم التسليم: " + res.delivered);
+        holder.txtRemaining.setText("المتبقي: " + res.remaining);
+    }
+
+    @Override
+    public int getItemCount() {
+        return list.size();
+    }
+
+    public class ViewHolder extends RecyclerView.ViewHolder{
+        TextView txtClient, txtPhone, txtQuantity, txtColor, txtLength, txtWidth, txtPrice, txtDelivered, txtRemaining;
+
+        public ViewHolder(@NonNull View itemView){
+            super(itemView);
+            txtClient = itemView.findViewById(R.id.txt_res_client);
+            txtPhone = itemView.findViewById(R.id.txt_res_phone);
+            txtQuantity = itemView.findViewById(R.id.txt_res_quantity);
+            txtColor = itemView.findViewById(R.id.txt_res_color);
+            txtLength = itemView.findViewById(R.id.txt_res_length);
+            txtWidth = itemView.findViewById(R.id.txt_res_width);
+            txtPrice = itemView.findViewById(R.id.txt_res_price);
+            txtDelivered = itemView.findViewById(R.id.txt_res_delivered);
+            txtRemaining = itemView.findViewById(R.id.txt_res_remaining);
+        }
+    }
+}package com.lamsat.tailormanager;
+
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.os.Bundle;
+import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import java.util.ArrayList;
+
+public class TailoringFragment extends Fragment {
+
+    RecyclerView recyclerView;
+    FloatingActionButton fabAdd;
+    ArrayList<TailoringItem> tailoringList;
+    TailoringAdapter adapter;
+    SQLiteHelper dbHelper;
+
+    public TailoringFragment() {}
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container,
+                             Bundle savedInstanceState) {
+        View view = inflater.inflate(R.layout.fragment_tailoring, container, false);
+
+        recyclerView = view.findViewById(R.id.recycler_tailoring);
+        fabAdd = view.findViewById(R.id.fab_add_tailoring);
+        dbHelper = new SQLiteHelper(getContext());
+
+        tailoringList = new ArrayList<>();
+        adapter = new TailoringAdapter(getContext(), tailoringList, dbHelper);
+        recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+        recyclerView.setAdapter(adapter);
+
+        loadTailoring();
+
+        fabAdd.setOnClickListener(v -> {
+            // TODO: Open AddTailoringDialog
+        });
+
+        return view;
+    }
+
+    private void loadTailoring() {
+        tailoringList.clear();
+        SQLiteDatabase db = dbHelper.getReadableDatabase();
+        Cursor cursor = db.rawQuery("SELECT * FROM tailoring", null);
+
+        if(cursor.moveToFirst()){
+            do {
+                TailoringItem item = new TailoringItem(
+                        cursor.getInt(cursor.getColumnIndex("id")),
+                        cursor.getString(cursor.getColumnIndex("client_name")),
+                        cursor.getString(cursor.getColumnIndex("phone")),
+                        cursor.getInt(cursor.getColumnIndex("length")),
+                        cursor.getInt(cursor.getColumnIndex("width")),
+                        cursor.getInt(cursor.getColumnIndex("neck")),
+                        cursor.getInt(cursor.getColumnIndex("sleeve")),
+                        cursor.getString(cursor.getColumnIndex("fabric")),
+                        cursor.getString(cursor.getColumnIndex("color")),
+                        cursor.getString(cursor.getColumnIndex("pockets")),
+                        cursor.getString(cursor.getColumnIndex("buttons")),
+                        cursor.getString(cursor.getColumnIndex("zipper")),
+                        cursor.getDouble(cursor.getColumnIndex("price")),
+                        cursor.getString(cursor.getColumnIndex("date"))
+                );
+                tailoringList.add(item);
+            } while(cursor.moveToNext());
+        }
+        cursor.close();
+        adapter.notifyDataSetChanged();
+    }
+}package com.lamsat.tailormanager;
+
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.os.Bundle;
+import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import java.util.ArrayList;
+
+public class AlterationsFragment extends Fragment {
+
+    RecyclerView recyclerView;
+    FloatingActionButton fabAdd;
+    ArrayList<AlterationItem> alterationsList;
+    AlterationsAdapter adapter;
+    SQLiteHelper dbHelper;
+
+    public AlterationsFragment() {}
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container,
+                             Bundle savedInstanceState) {
+        View view = inflater.inflate(R.layout.fragment_alterations, container, false);
+
+        recyclerView = view.findViewById(R.id.recycler_alterations);
+        fabAdd = view.findViewById(R.id.fab_add_alteration);
+        dbHelper = new SQLiteHelper(getContext());
+
+        alterationsList = new ArrayList<>();
+        adapter = new AlterationsAdapter(getContext(), alterationsList, dbHelper);
+        recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+        recyclerView.setAdapter(adapter);
+
+        loadAlterations();
+
+        fabAdd.setOnClickListener(v -> {
+            // TODO: Open AddAlterationDialog
+        });
+
+        return view;
+    }
+
+    private void loadAlterations() {
+        alterationsList.clear();
+        SQLiteDatabase db = dbHelper.getReadableDatabase();
+        Cursor cursor = db.rawQuery("SELECT * FROM alterations", null);
+
+        if(cursor.moveToFirst()){
+            do {
+                AlterationItem item = new AlterationItem(
+                        cursor.getInt(cursor.getColumnIndex("id")),
+                        cursor.getString(cursor.getColumnIndex("client_name")),
+                        cursor.getString(cursor.getColumnIndex("phone")),
+                        cursor.getInt(cursor.getColumnIndex("old_length")),
+                        cursor.getInt(cursor.getColumnIndex("old_width")),
+                        cursor.getInt(cursor.getColumnIndex("new_length")),
+                        cursor.getInt(cursor.getColumnIndex("new_width")),
+                        cursor.getDouble(cursor.getColumnIndex("price")),
+                        cursor.getString(cursor.getColumnIndex("status"))
+                );
+                alterationsList.add(item);
+            } while(cursor.moveToNext());
+        }
+        cursor.close();
+        adapter.notifyDataSetChanged();
+    }
+}package com.lamsat.tailormanager;
+
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.os.Bundle;
+import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import java.util.ArrayList;
+
+public class DebtsFragment extends Fragment {
+
+    RecyclerView recyclerView;
+    FloatingActionButton fabAdd;
+    ArrayList<DebtItem> debtsList;
+    DebtsAdapter adapter;
+    SQLiteHelper dbHelper;
+
+    public DebtsFragment() {}
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container,
+                             Bundle savedInstanceState) {
+        View view = inflater.inflate(R.layout.fragment_debts, container, false);
+
+        recyclerView = view.findViewById(R.id.recycler_debts);
+        fabAdd = view.findViewById(R.id.fab_add_debt);
+        dbHelper = new SQLiteHelper(getContext());
+
+        debtsList = new ArrayList<>();
+        adapter = new DebtsAdapter(getContext(), debtsList, dbHelper);
+        recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+        recyclerView.setAdapter(adapter);
+
+        loadDebts();
+
+        fabAdd.setOnClickListener(v -> {
+            // TODO: Open AddDebtDialog
+        });
+
+        return view;
+    }
+
+    private void loadDebts() {
+        debtsList.clear();
+        SQLiteDatabase db = dbHelper.getReadableDatabase();
+        Cursor cursor = db.rawQuery("SELECT * FROM debts", null);
+
+        if(cursor.moveToFirst()){
+            do {
+                DebtItem item = new DebtItem(
+                        cursor.getInt(cursor.getColumnIndex("id")),
+                        cursor.getString(cursor.getColumnIndex("name")),
+                        cursor.getString(cursor.getColumnIndex("phone")),
+                        cursor.getDouble(cursor.getColumnIndex("amount")),
+                        cursor.getDouble(cursor.getColumnIndex("remaining")),
+                        cursor.getString(cursor.getColumnIndex("type"))
+                );
+                debtsList.add(item);
+            } while(cursor.moveToNext());
+        }
+        cursor.close();
+        adapter.notifyDataSetChanged();
+    }
+}package com.lamsat.tailormanager;
+
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.os.Bundle;
+import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import java.util.ArrayList;
+
+public class SuppliersFragment extends Fragment {
+
+    RecyclerView recyclerView;
+    FloatingActionButton fabAdd;
+    ArrayList<SupplierItem> suppliersList;
+    SuppliersAdapter adapter;
+    SQLiteHelper dbHelper;
+
+    public SuppliersFragment() {}
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container,
+                             Bundle savedInstanceState) {
+        View view = inflater.inflate(R.layout.fragment_suppliers, container, false);
+
+        recyclerView = view.findViewById(R.id.recycler_suppliers);
+        fabAdd = view.findViewById(R.id.fab_add_supplier);
+        dbHelper = new SQLiteHelper(getContext());
+
+        suppliersList = new ArrayList<>();
+        adapter = new SuppliersAdapter(getContext(), suppliersList, dbHelper);
+        recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+        recyclerView.setAdapter(adapter);
+
+        loadSuppliers();
+
+        fabAdd.setOnClickListener(v -> {
+            // TODO: Open AddSupplierDialog
+        });
+
+        return view;
+    }
+
+    private void loadSuppliers() {
+        suppliersList.clear();
+        SQLiteDatabase db = dbHelper.getReadableDatabase();
+        Cursor cursor = db.rawQuery("SELECT * FROM suppliers", null);
+
+        if(cursor.moveToFirst()){
+            do {
+                SupplierItem item = new SupplierItem(
+                        cursor.getInt(cursor.getColumnIndex("id")),
+                        cursor.getString(cursor.getColumnIndex("name")),
+                        cursor.getString(cursor.getColumnIndex("phone")),
+                        cursor.getString(cursor.getColumnIndex("fabric_type")),
+                        cursor.getString(cursor.getColumnIndex("supplies"))
+                );
+                suppliersList.add(item);
+            } while(cursor.moveToNext());
+        }
+        cursor.close();
+        adapter.notifyDataSetChanged();
+    }
+}package com.lamsat.tailormanager;
+
+import android.os.Bundle;
+import androidx.fragment.app.Fragment;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.Toast;
+
+public class SettingsFragment extends Fragment {
+
+    Button btnGoogleLogin, btnFacebookLogin, btnPhoneLogin, btnLockApp;
+
+    public SettingsFragment() {}
+
+    @Override
+    public View onCreateView(LayoutInflater inflater, ViewGroup container,
+                             Bundle savedInstanceState) {
+        View view = inflater.inflate(R.layout.fragment_settings, container, false);
+
+        btnGoogleLogin = view.findViewById(R.id.btn_google_login);
+        btnFacebookLogin = view.findViewById(R.id.btn_facebook_login);
+        btnPhoneLogin = view.findViewById(R.id.btn_phone_login);
+        btnLockApp = view.findViewById(R.id.btn_lock_app);
+
+        btnGoogleLogin.setOnClickListener(v -> {
+            // TODO: Implement Google Sign-In
+            Toast.makeText(getContext(), "تسجيل الدخول بحساب Google", Toast.LENGTH_SHORT).show();
+        });
+
+        btnFacebookLogin.setOnClickListener(v -> {
+            // TODO: Implement Facebook Login
+            Toast.makeText(getContext(), "تسجيل الدخول بحساب Facebook", Toast.LENGTH_SHORT).show();
+        });
+
+        btnPhoneLogin.setOnClickListener(v -> {
+            // TODO: Implement Phone + Password Login
+            Toast.makeText(getContext(), "تسجيل الدخول برقم الهاتف وكلمة المرور", Toast.LENGTH_SHORT).show();
+        });
+
+        btnLockApp.setOnClickListener(v -> {
+            // TODO: Implement App Lock (Pattern, Pin, Fingerprint, Face)
+            Toast.makeText(getContext(), "قفل التطبيق مفعل", Toast.LENGTH_SHORT).show();
+        });
+
+        return view;
+    }
+}
